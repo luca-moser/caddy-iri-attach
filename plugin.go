@@ -98,12 +98,13 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	transactions := []giota.Transaction{}
-	for i := range txTrytes {
+	for i := len(txTrytes) - 1; i >= 0; i--{
 		tx, err := giota.NewTransaction(txTrytes[i])
 		if err != nil {
 			return http.StatusBadRequest, ErrBuildingTx
 		}
 		transactions = append(transactions, *tx)
+
 	}
 
 	bundle := &Transaction{
