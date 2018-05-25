@@ -112,8 +112,10 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		Transactions: transactions,
 	}
 
-	fmt.Sprintf("")
+	fmt.Printf("doing pow for %d txs\n", len(transactions))
+	s := time.Now().UnixNano()
 	doPow(bundle, 3, bundle.Transactions, 14, powFn)
+	fmt.Printf("took %dms to do pow for %d txs", (time.Now().UnixNano() - s) / 1000000, len(transactions))
 
 	// construct response
 	trytesRes := []giota.Trytes{}
