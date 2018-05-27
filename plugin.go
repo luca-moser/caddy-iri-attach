@@ -11,6 +11,7 @@ import (
 	"time"
 	"io/ioutil"
 	"bytes"
+	"sync"
 )
 
 var ErrMissingBody = errors.New("missing body")
@@ -58,6 +59,8 @@ type AttachToTangleRes struct {
 }
 
 const attachToTangleCommand = "attachToTangle"
+
+var mu = sync.Mutex{}
 
 func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) (int, error) {
 	if r.Method != http.MethodPost {
@@ -115,6 +118,9 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	fmt.Printf("doing pow for %d txs\n", len(transactions))
 	s := time.Now().UnixNano()
+	// only allow one PoW at a time
+	mu.Lock()
+	defer mu.Unlock()
 	doPow(bundle, 3, bundle.Transactions, 14, powFn)
 	fmt.Printf("took %dms to do pow for %d txs", (time.Now().UnixNano() - s) / 1000000, len(transactions))
 
