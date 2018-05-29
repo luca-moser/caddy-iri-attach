@@ -7,11 +7,13 @@ import (
 	"github.com/pkg/errors"
 	"net/http"
 	"encoding/json"
-	"fmt"
 	"time"
 	"io/ioutil"
+	"log"
 	"bytes"
 	"sync"
+	"strconv"
+	"math"
 )
 
 var ErrMissingBody = errors.New("missing body")
@@ -19,6 +21,8 @@ var ErrBodyUnparsable = errors.New("body can't be parsed to command")
 var ErrFetchRawTips = errors.New("couldn't fetch raw tips data from node")
 var ErrBuildingTx = errors.New("couldn't build transaction from trytes")
 var ErrBuildingRes = errors.New("couldn't build response")
+var ErrMissingTxBundleLimit = errors.New("expected tx bundle limit after the attach directive")
+var ErrTxBundleLimitExceeded = errors.New("the number of transactions exceeds the limit")
 
 func init() {
 	caddy.RegisterPlugin("attach", caddy.Plugin{
@@ -28,11 +32,25 @@ func init() {
 }
 
 var powFn giota.PowFunc
+var maxTxInBundle = 200
 
 func setup(c *caddy.Controller) error {
 	name, powfunc := giota.GetBestPoW()
 	powFn = powfunc
-	fmt.Println("using proof of work:", name)
+	var err error
+	for c.Next() {
+		if !c.NextArg() {
+			break
+		}
+		maxTxInBundle, err = strconv.Atoi(c.Val())
+		if err != nil {
+			log.Printf("setting default max bundle txs to %d\n", 200)
+			maxTxInBundle = 200
+			continue
+		}
+	}
+	log.Printf("attachToTangle interception configured with max bundle txs limit of %d\n", maxTxInBundle)
+	log.Printf("using proof of work method: %s\n", name)
 	cfg := httpserver.GetConfig(c)
 	mid := func(next httpserver.Handler) httpserver.Handler {
 		return AttachToTangleHandler{Next: next}
@@ -73,7 +91,7 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	contents, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		panic(err)
+		return http.StatusBadRequest, ErrMissingBody
 	}
 
 	command := &AttachToTangleCmd{}
@@ -90,6 +108,12 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return h.Next.ServeHTTP(w, r)
 	}
 
+	// only allow one PoW at a time
+	// we could lock later but for keeping log order we do it from here
+	mu.Lock()
+	defer mu.Unlock()
+
+	log.Printf("new attachToTangle request from %s\n", r.RemoteAddr)
 	start := time.Now().UnixNano()
 
 	trunkTxHash := command.TrunkTxHash
@@ -100,14 +124,29 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return h.Next.ServeHTTP(w, r)
 	}
 
+	if len(txTrytes) > maxTxInBundle {
+		return http.StatusBadRequest, errors.Wrapf(ErrTxBundleLimitExceeded, "max allowed is %d", maxTxInBundle)
+	}
+
+	var isValueTransaction bool
+	var inputValue int64
 	transactions := []giota.Transaction{}
-	for i := len(txTrytes) - 1; i >= 0; i--{
+	for i := len(txTrytes) - 1; i >= 0; i-- {
 		tx, err := giota.NewTransaction(txTrytes[i])
 		if err != nil {
 			return http.StatusBadRequest, ErrBuildingTx
 		}
+		if tx.Value > 0 {
+			isValueTransaction = true
+		}
+		if tx.Value < 0 {
+			inputValue += tx.Value
+		}
 		transactions = append(transactions, *tx)
+	}
 
+	if isValueTransaction {
+		log.Printf("bundle is using %d IOTAs as input\n", int64(math.Abs(float64(inputValue))))
 	}
 
 	bundle := &Transaction{
@@ -116,13 +155,10 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		Transactions: transactions,
 	}
 
-	fmt.Printf("doing pow for %d txs\n", len(transactions))
+	log.Printf("doing pow for bundle with %d txs (value tx=%v)\n", len(transactions), isValueTransaction)
 	s := time.Now().UnixNano()
-	// only allow one PoW at a time
-	mu.Lock()
-	defer mu.Unlock()
-	doPow(bundle, 3, bundle.Transactions, 14, powFn)
-	fmt.Printf("took %dms to do pow for %d txs", (time.Now().UnixNano() - s) / 1000000, len(transactions))
+	doPow(bundle, bundle.Transactions, 14, powFn)
+	log.Printf("took %dms to do pow for bundle with %d txs\n", (time.Now().UnixNano()-s)/1000000, len(transactions))
 
 	// construct response
 	trytesRes := []giota.Trytes{}
@@ -138,7 +174,7 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set(contentType, contentTypeJSON)
-	w.Header().Set("access-control-allow-origin","*")
+	w.Header().Set("access-control-allow-origin", "*")
 	w.Write(resBytes)
 	return http.StatusOK, nil
 }
@@ -159,7 +195,7 @@ type Transaction struct {
 	Transactions  []giota.Transaction
 }
 
-func doPow(tra *Transaction, depth int64, tx []giota.Transaction, mwm int64, pow giota.PowFunc) error {
+func doPow(tra *Transaction, tx []giota.Transaction, mwm int64, pow giota.PowFunc) error {
 	var prev giota.Trytes
 	var err error
 	for i := len(tx) - 1; i >= 0; i-- {
