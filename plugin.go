@@ -156,13 +156,17 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		if tx.Value < 0 {
 			inputValue += tx.Value
 		}
-		logger.Printf("%s - %d\n", tx.Hash(), tx.Value)
+		// print out address
+		logger.Printf("%s - %d\n", tx.Address, tx.Value)
 		transactions = append(transactions, *tx)
 	}
 
 	if isValueTransaction {
 		logger.Printf("bundle is using %d IOTAs as input\n", int64(math.Abs(float64(inputValue))))
 	}
+
+	logger.Printf("bundle: %s\n", transactions[0].Bundle)
+
 
 	bundle := &Transaction{
 		Trunk:        trunkTxHash,
