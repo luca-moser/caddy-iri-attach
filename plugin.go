@@ -144,6 +144,7 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	var isValueTransaction bool
 	var inputValue int64
 	transactions := []giota.Transaction{}
+	logger.Printf("transactions:\n")
 	for i := len(txTrytes) - 1; i >= 0; i-- {
 		tx, err := giota.NewTransaction(txTrytes[i])
 		if err != nil {
@@ -155,6 +156,7 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		if tx.Value < 0 {
 			inputValue += tx.Value
 		}
+		logger.Printf("%s - %d\n", tx.Hash(), tx.Value)
 		transactions = append(transactions, *tx)
 	}
 
