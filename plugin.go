@@ -27,7 +27,7 @@ var ErrBuildingRes = errors.New("couldn't build response")
 var ErrMissingTxBundleLimit = errors.New("expected tx bundle limit after the attach directive")
 var ErrTxBundleLimitExceeded = errors.New("the number of transactions in the bundle exceed the attachToTangle limit")
 
-var logger log.Logger
+var logger *log.Logger
 
 func init() {
 	caddy.RegisterPlugin("attach", caddy.Plugin{
@@ -41,7 +41,7 @@ func init() {
 	}
 	// we don't buffer writes to the log file because write frequency is very log
 	multiWriter := io.MultiWriter(os.Stdout, logfile)
-	log.New(multiWriter, "middleware", log.Ldate|log.Ltime|log.Lshortfile)
+	logger = log.New(multiWriter, "middleware", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 var powFn giota.PowFunc
