@@ -41,7 +41,7 @@ func init() {
 	}
 	// we don't buffer writes to the log file because write frequency is very log
 	multiWriter := io.MultiWriter(os.Stdout, logfile)
-	logger = log.New(multiWriter, "middleware", log.Ldate|log.Ltime|log.Lshortfile)
+	logger = log.New(multiWriter, "middleware", log.Ldate|log.Ltime)
 }
 
 var powFn giota.PowFunc
