@@ -14,6 +14,9 @@ import (
 	"sync"
 	"strconv"
 	"math"
+	"os"
+	"io"
+	"fmt"
 )
 
 var ErrMissingBody = errors.New("missing body")
@@ -22,13 +25,23 @@ var ErrFetchRawTips = errors.New("couldn't fetch raw tips data from node")
 var ErrBuildingTx = errors.New("couldn't build transaction from trytes")
 var ErrBuildingRes = errors.New("couldn't build response")
 var ErrMissingTxBundleLimit = errors.New("expected tx bundle limit after the attach directive")
-var ErrTxBundleLimitExceeded = errors.New("the number of transactions exceeds the limit")
+var ErrTxBundleLimitExceeded = errors.New("the number of transactions in the bundle exceed the attachToTangle limit")
+
+var logger log.Logger
 
 func init() {
 	caddy.RegisterPlugin("attach", caddy.Plugin{
 		ServerType: "http",
 		Action:     setup,
 	})
+	logfile, err := os.OpenFile("attachToTangle.log", os.O_APPEND|os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Println("unable to open/create middleware log file")
+		panic(err)
+	}
+	// we don't buffer writes to the log file because write frequency is very log
+	multiWriter := io.MultiWriter(os.Stdout, logfile)
+	log.New(multiWriter, "middleware", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 var powFn giota.PowFunc
@@ -44,13 +57,13 @@ func setup(c *caddy.Controller) error {
 		}
 		maxTxInBundle, err = strconv.Atoi(c.Val())
 		if err != nil {
-			log.Printf("setting default max bundle txs to %d\n", 200)
+			logger.Printf("setting default max bundle txs to %d\n", 200)
 			maxTxInBundle = 200
 			continue
 		}
 	}
-	log.Printf("attachToTangle interception configured with max bundle txs limit of %d\n", maxTxInBundle)
-	log.Printf("using proof of work method: %s\n", name)
+	logger.Printf("attachToTangle interception configured with max bundle txs limit of %d\n", maxTxInBundle)
+	logger.Printf("using proof of work method: %s\n", name)
 	cfg := httpserver.GetConfig(c)
 	mid := func(next httpserver.Handler) httpserver.Handler {
 		return AttachToTangleHandler{Next: next}
@@ -113,7 +126,7 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	mu.Lock()
 	defer mu.Unlock()
 
-	log.Printf("new attachToTangle request from %s\n", r.RemoteAddr)
+	logger.Printf("new attachToTangle request from %s\n", r.RemoteAddr)
 	start := time.Now().UnixNano()
 
 	trunkTxHash := command.TrunkTxHash
@@ -146,7 +159,7 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	if isValueTransaction {
-		log.Printf("bundle is using %d IOTAs as input\n", int64(math.Abs(float64(inputValue))))
+		logger.Printf("bundle is using %d IOTAs as input\n", int64(math.Abs(float64(inputValue))))
 	}
 
 	bundle := &Transaction{
@@ -155,10 +168,10 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		Transactions: transactions,
 	}
 
-	log.Printf("doing pow for bundle with %d txs (value tx=%v)\n", len(transactions), isValueTransaction)
+	logger.Printf("doing pow for bundle with %d txs (value tx=%v)\n", len(transactions), isValueTransaction)
 	s := time.Now().UnixNano()
 	doPow(bundle, bundle.Transactions, 14, powFn)
-	log.Printf("took %dms to do pow for bundle with %d txs\n", (time.Now().UnixNano()-s)/1000000, len(transactions))
+	logger.Printf("took %dms to do pow for bundle with %d txs\n", (time.Now().UnixNano()-s)/1000000, len(transactions))
 
 	// construct response
 	trytesRes := []giota.Trytes{}
