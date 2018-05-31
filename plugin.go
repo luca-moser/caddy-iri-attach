@@ -126,8 +126,6 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	mu.Lock()
 	defer mu.Unlock()
 
-	logger.Printf("new attachToTangle request from %s\n", r.RemoteAddr)
-	start := time.Now().UnixNano()
 
 	trunkTxHash := command.TrunkTxHash
 	branchTxHash := command.BranchTxHash
@@ -137,9 +135,12 @@ func (h AttachToTangleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return h.Next.ServeHTTP(w, r)
 	}
 
+	logger.Printf("new attachToTangle request from %s\n", r.RemoteAddr)
 	if len(txTrytes) > maxTxInBundle {
+		logger.Printf("canceling request as it exceeds the txs limit (%d>%d)\n", len(txTrytes), maxTxInBundle)
 		return http.StatusBadRequest, errors.Wrapf(ErrTxBundleLimitExceeded, "max allowed is %d", maxTxInBundle)
 	}
+	start := time.Now().UnixNano()
 
 	var isValueTransaction bool
 	var inputValue int64
